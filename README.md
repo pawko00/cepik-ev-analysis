@@ -24,6 +24,8 @@ Official CEPiK API (Central Register of Vehicles and Drivers, Ministry of Digita
 pip install -r requirements.txt
 python download.py        # ~1 day (API rate limits), resumes after interruption
 python load_postgres.py   # loads data into PostgreSQL, can be run while downloading
+python fetch_gus.py       # reference data from Statistics Poland (counties, TERYT codes)
+python run_sql.py         # builds the analytical model (sql/*.sql, in order, with tests)
 ```
 
 PostgreSQL connection: copy `.env.example` to `.env` and fill in the password
@@ -57,6 +59,36 @@ process – on restart it continues where it left off.
 - `cepik.try_date()`, `cepik.try_num()` – safe casts (a bad value gives NULL instead of an error)
 
 Values in the data (e.g. `SAMOCHÓD OSOBOWY`, `LUBELSKIE`) are kept in Polish, as in the source.
+
+## Reference data (PostgreSQL, schema `gus`)
+
+From the GUS Local Data Bank API (<https://bdl.stat.gov.pl>), loaded by `fetch_gus.py`:
+
+- `gus.voivodeship` – 16 voivodeships with TERYT codes
+- `gus.county` – 380 counties (66 city, 314 rural) with TERYT codes; historical units
+  kept by BDL (e.g. *powiat warszawski*, abolished in 2002) are filtered out
+
+## Analytical model (PostgreSQL, schema `dw`)
+
+Built by `run_sql.py` from the files in `sql/`. Each file ends with tests that fail the build
+if the data doesn't add up.
+
+### `dw.dim_location` – where vehicles are registered
+
+**CEPiK records the registration office, not the owner's place of residence** – the owner
+location fields are empty for all records. 45 rural counties are served by the office of the
+neighbouring city (e.g. *powiat lubelski* is served from Lublin), so CEPiK reports them under
+the city's name and there is no separate *LUBELSKI* county in the data. Joining CEPiK with GUS
+statistics by county name would silently drop these 45 counties.
+
+| Table | Grain | Purpose |
+|---|---|---|
+| `dw.dim_location` | registration area (335) | dimension for the fact table; `area_type`: `city`, `rural`, `city + rural` |
+| `dw.bridge_location_county` | GUS county (380) | registration area → official counties, to aggregate population, income etc. |
+| `dw.county_registration_seat` | rural county (45) | documented manual mapping: rural county → city it is registered under |
+
+Also note: county names are not unique across voivodeships (e.g. *ŚWIDNICKI* exists in
+Lubelskie and Dolnośląskie), so locations are always identified by voivodeship + county.
 
 ---
 
