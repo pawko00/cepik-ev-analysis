@@ -26,12 +26,18 @@ def main() -> None:
     env = read_env()
     with psycopg.connect(host=env["PGHOST"], port=env["PGPORT"], user=env["PGUSER"],
                          password=env["PGPASSWORD"], dbname=env["PGDATABASE"]) as con:
+        notices = []        # RAISE INFO messages from the SQL files (e.g. test summaries), printed after each file
+        con.add_notice_handler(
+            lambda d: notices.append(d.message_primary) if d.severity_nonlocalized == "INFO" else None)
         for f in files:
             print(f"Running {f.name} ...", end=" ", flush=True)
             try:
                 con.execute(f.read_text(encoding="utf-8"))
                 con.commit()
                 print("OK")
+                for msg in notices:
+                    print(f"    {msg}")
+                notices.clear()
             except psycopg.Error as e:
                 con.rollback()
                 print("FAILED")
